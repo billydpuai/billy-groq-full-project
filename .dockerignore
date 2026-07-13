@@ -1,0 +1,5 @@
+models/
+billy-env/
+__pycache__/
+*.pyc
+.git/
