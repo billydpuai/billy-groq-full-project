@@ -3,3 +3,4 @@ models/
 __pycache__/
 *.pyc
 billy-env/
+node_modules/
