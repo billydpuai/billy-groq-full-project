@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 billy-env/
 node_modules/
+billy_autosync.log
