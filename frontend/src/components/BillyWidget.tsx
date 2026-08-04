@@ -36,45 +36,63 @@ function sanitizeSources(raw: unknown): string[] {
   });
 }
 
+const URL_REGEX = /(https?:\/\/[^\s]+[^\s.,;:!?)\]'"])/g;
+
+function linkify(text: string, keyPrefix: string) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, idx) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a
+          key={keyPrefix + '-' + idx}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: NAVY, textDecoration: 'underline', wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+        >
+          {part}
+        </a>
+      );
+    }
+    return <React.Fragment key={keyPrefix + '-' + idx}>{part}</React.Fragment>;
+  });
+}
+
 function formatBillyText(text: string) {
   if (!text) return null;
   const lines = text.split('\n').filter(l => l.trim());
 
   return (
-    <div style={{ fontSize: '13px', lineHeight: '1.65', color: '#222' }}>
+    <div style={{ fontSize: '13px', lineHeight: '1.65', color: '#222', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
       {lines.map((line, i) => {
         const trimmed = line.trim();
 
-        // Only treat as bullet if line explicitly starts with bullet character
         if (trimmed.startsWith('•')) {
           return (
             <div key={i} style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'flex-start' }}>
               <span style={{ color: '#003DA5', fontWeight: 'bold', flexShrink: 0 }}>•</span>
-              <span>{trimmed.replace(/^•\s*/, '')}</span>
+              <span>{linkify(trimmed.replace(/^•\s*/, ''), 'b' + i)}</span>
             </div>
           );
         }
 
-        // Only treat as numbered if line starts with digit+period+space
         if (/^\d+\.\s/.test(trimmed)) {
           return (
             <div key={i} style={{ display: 'flex', gap: '8px', marginTop: '4px', alignItems: 'flex-start' }}>
               <span style={{ color: '#003DA5', fontWeight: 'bold', flexShrink: 0 }}>{trimmed.match(/^\d+\./)![0]}</span>
-              <span>{trimmed.replace(/^\d+\.\s*/, '')}</span>
+              <span>{linkify(trimmed.replace(/^\d+\.\s*/, ''), 'n' + i)}</span>
             </div>
           );
         }
 
-        // Bold header — short line ending with colon
         if (trimmed.endsWith(':') && trimmed.length < 55 && !trimmed.includes(',')) {
           return (
             <p key={i} style={{ fontWeight: '700', color: '#003DA5', margin: i === 0 ? '0' : '10px 0 3px' }}>{trimmed}</p>
           );
         }
 
-        // Regular paragraph — no bullet
         return (
-          <p key={i} style={{ margin: i === 0 ? '0' : '6px 0 0' }}>{trimmed}</p>
+          <p key={i} style={{ margin: i === 0 ? '0' : '6px 0 0' }}>{linkify(trimmed, 'p' + i)}</p>
         );
       })}
     </div>
@@ -82,6 +100,11 @@ function formatBillyText(text: string) {
 }
 
 export function BillyWidget() {
+  const BUILD_LABEL = (
+    <div style={{ position: 'fixed', top: 8, left: 8, zIndex: 99999, background: '#003DA5', color: '#fff', fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 6 }}>
+      GROQ BUILD
+    </div>
+  );
   const isMobile = useIsMobile();
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -91,34 +114,31 @@ export function BillyWidget() {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Inject keyframes for Billy's jump + dot bounce
   useEffect(() => {
     const style = document.createElement('style');
     style.id = 'billy-keyframes';
-    style.textContent = `
-      @keyframes billyJump {
-        0%, 100% { transform: translateY(0px) rotate(0deg); }
-        20% { transform: translateY(-16px) rotate(-3deg); }
-        40% { transform: translateY(-8px) rotate(2deg); }
-        60% { transform: translateY(-14px) rotate(-2deg); }
-        80% { transform: translateY(-4px) rotate(1deg); }
-      }
-      @keyframes dotBounce {
-        0%, 80%, 100% { transform: translateY(0); opacity: 1; }
-        40%            { transform: translateY(-6px); opacity: 0.5; }
-      }
-      @keyframes labelPulse {
-        0%, 100% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(1.04); opacity: 0.92; }
-      }
-    `;
+    style.textContent =
+      '@keyframes billyJump {\n' +
+      '  0%, 100% { transform: translateY(0px) rotate(0deg); }\n' +
+      '  20% { transform: translateY(-16px) rotate(-3deg); }\n' +
+      '  40% { transform: translateY(-8px) rotate(2deg); }\n' +
+      '  60% { transform: translateY(-14px) rotate(-2deg); }\n' +
+      '  80% { transform: translateY(-4px) rotate(1deg); }\n' +
+      '}\n' +
+      '@keyframes dotBounce {\n' +
+      '  0%, 80%, 100% { transform: translateY(0); opacity: 1; }\n' +
+      '  40%            { transform: translateY(-6px); opacity: 0.5; }\n' +
+      '}\n' +
+      '@keyframes labelPulse {\n' +
+      '  0%, 100% { transform: scale(1); opacity: 1; }\n' +
+      '  50% { transform: scale(1.04); opacity: 0.92; }\n' +
+      '}\n';
     if (!document.getElementById('billy-keyframes')) {
       document.head.appendChild(style);
     }
     return () => { document.getElementById('billy-keyframes')?.remove(); };
   }, []);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
@@ -131,11 +151,16 @@ export function BillyWidget() {
     setMessages(prev => [...prev, { role: 'loading', text: '' }]);
     setLoading(true);
     try {
-      const res = await fetch('https://chemicals-freefall-grueling.ngrok-free.dev/ask', {
+      const res = await fetch('https://pesky-colonize-buddy.ngrok-free.dev/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userMsg }),
       });
+
+      if (!res.ok) {
+        throw new Error('Request failed with status ' + res.status);
+      }
+
       const data = await res.json() as {
         answer?: string; sources?: unknown;
         status?: string; email_draft?: unknown;
@@ -178,10 +203,8 @@ export function BillyWidget() {
 
   return (
     <>
-      {/* Floating widget */}
       <div style={{ position: 'fixed', bottom: isMobile ? 16 : 28, right: isMobile ? 16 : 28, zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
 
-        {/* Chat window */}
         {chatOpen && (
           <div style={{
             position: 'absolute', bottom: 100, right: 0,
@@ -191,14 +214,13 @@ export function BillyWidget() {
             boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
-            {/* Header */}
             <div style={{
               background: NAVY, padding: '14px 20px',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <img src="/billy.png" alt="Billy mascot" width={32} height={32} style={{ objectFit: 'contain', borderRadius: '50%', background: 'rgba(255,255,255,0.15)' }} />
-                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant</p>
+                <img src="/billy-v3.png" alt="Billy mascot" width={40} height={40} style={{ objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: 2 }} />
+                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, background: '#F5A623', color: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>⚡ GROQ</span></p>
               </div>
               <button
                 onClick={() => setChatOpen(false)}
@@ -207,7 +229,6 @@ export function BillyWidget() {
               >✕</button>
             </div>
 
-            {/* Messages */}
             <div style={{
               flex: 1, overflowY: 'auto', padding: 16,
               display: 'flex', flexDirection: 'column', gap: 12,
@@ -221,7 +242,7 @@ export function BillyWidget() {
                         {[0, 1, 2].map((d) => (
                           <div key={d} style={{
                             width: 6, height: 6, borderRadius: '50%', background: '#999',
-                            animation: `dotBounce 1.2s ease-in-out ${d * 0.2}s infinite`,
+                            animation: 'dotBounce 1.2s ease-in-out ' + (d * 0.2) + 's infinite',
                           }} />
                         ))}
                       </div>
@@ -230,14 +251,21 @@ export function BillyWidget() {
                 }
                 if (msg.role === 'billy') {
                   return (
-                    <div key={i} style={{ alignSelf: 'flex-start', maxWidth: '78%' }}>
-                      <div style={{ background: '#fff', borderRadius: '18px 18px 18px 4px', padding: '12px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+                    <div key={i} style={{ alignSelf: 'flex-start', maxWidth: '78%', minWidth: 0 }}>
+                      <div style={{
+                        background: '#fff', borderRadius: '18px 18px 18px 4px', padding: '12px 16px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                        wordBreak: 'break-word', overflowWrap: 'anywhere',
+                      }}>
                         <div>{formatBillyText(msg.text)}</div>
                         {msg.sources && msg.sources.length > 0 && (
                           <div style={{ marginTop: 8, borderTop: '1px solid #eee', paddingTop: 8 }}>
                             {msg.sources.map((src, si) => (
                               <a key={si} href={src} target="_blank" rel="noopener noreferrer"
-                                style={{ display: 'block', color: '#999', fontSize: 10.5, textDecoration: 'none' }}>
+                                style={{
+                                  display: 'block', color: '#999', fontSize: 10.5, textDecoration: 'none',
+                                  wordBreak: 'break-word', overflowWrap: 'anywhere',
+                                }}>
                                 ↗ {src}
                               </a>
                             ))}
@@ -249,23 +277,27 @@ export function BillyWidget() {
                               <span style={{ fontSize: 16 }}>✉️</span>
                               <span style={{ color: NAVY, fontWeight: 700, fontSize: 13 }}>Email Draft Ready</span>
                             </div>
-                            <div style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>
+                            <div style={{ fontSize: 12, color: '#555', marginBottom: 6, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                               <span style={{ fontWeight: 700, color: NAVY }}>To: </span>{msg.emailDraft.department}
                             </div>
-                            <div style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>
+                            <div style={{ fontSize: 12, color: '#555', marginBottom: 6, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                               <span style={{ fontWeight: 700, color: NAVY }}>Email: </span>
-                              <a href={`mailto:${msg.emailDraft.to}`} style={{ color: SCARLET }}>{msg.emailDraft.to}</a>
+                              <a href={'mailto:' + msg.emailDraft.to} style={{ color: SCARLET }}>{msg.emailDraft.to}</a>
                             </div>
-                            <div style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
+                            <div style={{ fontSize: 12, color: '#555', marginBottom: 10, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                               <span style={{ fontWeight: 700, color: NAVY }}>Subject: </span>{msg.emailDraft.subject}
                             </div>
-                            <div style={{ background: '#fff', borderRadius: 8, padding: 12, fontSize: 12, color: '#333', lineHeight: 1.7, whiteSpace: 'pre-wrap', border: '1px solid #ddd', maxHeight: 140, overflowY: 'auto' }}>
+                            <div style={{
+                              background: '#fff', borderRadius: 8, padding: 12, fontSize: 12, color: '#333',
+                              lineHeight: 1.7, whiteSpace: 'pre-wrap', border: '1px solid #ddd', maxHeight: 140, overflowY: 'auto',
+                              wordBreak: 'break-word', overflowWrap: 'anywhere',
+                            }}>
                               {msg.emailDraft.body}
                             </div>
                             <button
                               onClick={() => {
                                 const draft = msg.emailDraft!;
-                                const mailto = `mailto:${draft.to}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
+                                const mailto = 'mailto:' + draft.to + '?subject=' + encodeURIComponent(draft.subject) + '&body=' + encodeURIComponent(draft.body);
                                 window.open(mailto);
                               }}
                               style={{ marginTop: 10, background: NAVY, color: '#fff', border: 'none', borderRadius: 20, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', width: '100%' }}
@@ -275,9 +307,9 @@ export function BillyWidget() {
                             <button
                               onClick={() => {
                                 const draft = msg.emailDraft!;
-                                navigator.clipboard.writeText(`To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`);
+                                navigator.clipboard.writeText('To: ' + draft.to + '\nSubject: ' + draft.subject + '\n\n' + draft.body);
                               }}
-                              style={{ marginTop: 6, background: 'transparent', color: NAVY, border: `1px solid ${NAVY}`, borderRadius: 20, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', width: '100%' }}
+                              style={{ marginTop: 6, background: 'transparent', color: NAVY, border: '1px solid ' + NAVY, borderRadius: 20, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', width: '100%' }}
                             >
                               📋 Copy to Clipboard
                             </button>
@@ -288,8 +320,11 @@ export function BillyWidget() {
                   );
                 }
                 return (
-                  <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '78%' }}>
-                    <div style={{ background: SCARLET, borderRadius: '18px 18px 4px 18px', padding: '12px 16px' }}>
+                  <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '78%', minWidth: 0 }}>
+                    <div style={{
+                      background: SCARLET, borderRadius: '18px 18px 4px 18px', padding: '12px 16px',
+                      wordBreak: 'break-word', overflowWrap: 'anywhere',
+                    }}>
                       <p style={{ margin: 0, color: '#fff', fontSize: 13.5, lineHeight: 1.65 }}>{msg.text}</p>
                     </div>
                   </div>
@@ -298,7 +333,6 @@ export function BillyWidget() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <div style={{ padding: '12px 16px', borderTop: '1px solid #eee', background: '#fff', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
               <input
                 type="text"
@@ -332,7 +366,6 @@ export function BillyWidget() {
           </div>
         )}
 
-        {/* "Ask Billy" label — only when closed */}
         {!chatOpen && (
           <div
             onClick={() => setChatOpen(true)}
@@ -354,13 +387,12 @@ export function BillyWidget() {
           </div>
         )}
 
-        {/* Billy image button */}
         <div
           onClick={() => setChatOpen(!chatOpen)}
           style={{ cursor: 'pointer', width: '68px', height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}
         >
           <img
-            src="/billy.png"
+            src="/billy-v3.png"
             alt="Billy"
             style={{
               width: '68px',
