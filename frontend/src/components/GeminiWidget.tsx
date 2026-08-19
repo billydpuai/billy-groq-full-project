@@ -72,7 +72,7 @@ export function GeminiWidget() {
   const isMobile = useIsMobile();
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'billy', text: "Hi! I'm Billy, running on Gemini (test build). I can answer questions about admissions, financial aid, programs, campus life, and more. 😊" },
+    { role: 'billy', text: "Hi! I'm Billy, DePaul's AI assistant. I can answer questions about admissions, financial aid, programs, campus life, and more. 😊" },
   ]);
   const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
@@ -174,7 +174,7 @@ export function GeminiWidget() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <img src="/billy-v3.png" alt="Billy mascot" width={40} height={40} style={{ objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: 2 }} />
-                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Gemini</p>
+                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, background: PURPLE, color: '#fff', padding: '2px 6px', borderRadius: 4 }}>✨ GEMINI</span></p>
               </div>
               <button
                 onClick={() => setChatOpen(false)}
@@ -283,7 +283,7 @@ export function GeminiWidget() {
               boxShadow: '0 2px 10px rgba(139,92,246,0.4)',
             }}
           >
-            Ask Billy (Gemini)!
+            Ask Billy!
           </div>
         )}
 
