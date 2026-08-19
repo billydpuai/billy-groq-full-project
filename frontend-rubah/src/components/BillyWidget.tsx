@@ -163,6 +163,7 @@ export function BillyWidget() {
         num_documents?: number;
         documents?: unknown;
         no_answer?: boolean;
+        off_topic?: boolean;
         error?: string;
       };
 
@@ -171,6 +172,18 @@ export function BillyWidget() {
           prev.filter(m => m.role !== 'loading').concat({
             role: 'billy',
             text: data.error || "I'm having trouble finding an answer right now. Please try again.",
+          })
+        );
+      } else if (data.off_topic === true) {
+        // Off-topic questions never attempt an email draft -- Billy's own
+        // response text is already the correct final answer here (see the
+        // off_topic short-circuit in app.py). This check must come before
+        // the no_answer branch below, since off-topic questions also set
+        // no_answer to true on the backend.
+        setMessages(prev =>
+          prev.filter(m => m.role !== 'loading').concat({
+            role: 'billy',
+            text: data.response || "I'm sorry, I can only answer questions about DePaul University.",
           })
         );
       } else if (data.no_answer === true) {
@@ -260,7 +273,7 @@ export function BillyWidget() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <img src="/billy-v3.png" alt="Billy mascot" width={40} height={40} style={{ objectFit: 'contain', borderRadius: '50%', background: '#ffffff', padding: 2 }} />
-                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant</p>
+                <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, background: '#00A67E', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>LLAMA 3.1 8B</span></p>
               </div>
               <button
                 onClick={() => setChatOpen(false)}
