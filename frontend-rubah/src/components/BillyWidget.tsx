@@ -99,9 +99,26 @@ function formatBillyText(text: string) {
   );
 }
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const random = Math.random() * 16 | 0;
+    const value = character === 'x' ? random : (random & 0x3 | 0x8);
+    return value.toString(16);
+  });
+}
+
 export function BillyWidget() {
   const isMobile = useIsMobile();
   const [chatOpen, setChatOpen] = useState(false);
+  const [view, setView] = useState<'chat' | 'confirm-close' | 'rating'>('chat');
+  const conversationId = useRef(generateUUID());
+  const [ratingVal, setRatingVal] = useState<'up' | 'down' | null>(null);
+  const [feedbackVal, setFeedbackVal] = useState('');
+  const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
+  const activeRequestRef = useRef<AbortController | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'billy', text: "Hi! I'm Billy, DePaul's AI assistant. I can answer questions about admissions, financial aid, programs, campus life, and more. If I can't answer something, I'll draft an email to the right DePaul department for you! 😊" },
   ]);
@@ -135,23 +152,97 @@ export function BillyWidget() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+    if (view === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, loading, view]);
+
+  const resetSession = () => {
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = null;
+    conversationId.current = generateUUID();
+    setMessages([
+      { role: 'billy', text: "Hi! I'm Billy, DePaul's AI assistant. I can answer questions about admissions, financial aid, programs, campus life, and more. If I can't answer something, I'll draft an email to the right DePaul department for you! 😊" },
+    ]);
+    setInputVal('');
+    setLoading(false);
+    setView('chat');
+    setRatingVal(null);
+    setFeedbackVal('');
+    setFeedbackStatus('idle');
+  };
+
+  const submitFeedback = async (skip: boolean) => {
+    if (skip || !ratingVal) {
+      resetSession();
+      setChatOpen(false);
+      return;
+    }
+
+    activeRequestRef.current?.abort();
+    const controller = new AbortController();
+    const feedbackConversationId = conversationId.current;
+    activeRequestRef.current = controller;
+    setFeedbackStatus('submitting');
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15000);
+
+    try {
+      const response = await fetch('https://hurried-gazing-harmonize.ngrok-free.dev/api/conversation-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: feedbackConversationId,
+          rating: ratingVal,
+          feedback: feedbackVal,
+        }),
+        signal: controller.signal,
+      });
+      if (
+        feedbackConversationId !== conversationId.current ||
+        activeRequestRef.current !== controller
+      ) return;
+      if (!response.ok) throw new Error('Feedback request failed');
+      resetSession();
+      setChatOpen(false);
+    } catch {
+      if (
+        feedbackConversationId === conversationId.current &&
+        activeRequestRef.current === controller &&
+        (timedOut || !controller.signal.aborted)
+      ) {
+        setFeedbackStatus('error');
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+      }
+    }
+  };
 
   const sendMessage = async () => {
     if (!inputVal.trim() || loading) return;
     const userMsg = inputVal.trim();
+    const requestConversationId = conversationId.current;
+    const controller = new AbortController();
     setInputVal('');
     setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
     setMessages(prev => [...prev, { role: 'loading', text: '' }]);
     setLoading(true);
+    activeRequestRef.current = controller;
     try {
       const res = await fetch('https://hurried-gazing-harmonize.ngrok-free.dev/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMsg, user_id: 'anonymous' }),
+        body: JSON.stringify({ query: userMsg, user_id: 'anonymous', conversation_id: requestConversationId }),
+        signal: controller.signal,
       });
 
+      if (requestConversationId !== conversationId.current) return;
       if (!res.ok) {
         throw new Error('Request failed with status ' + res.status);
       }
@@ -165,6 +256,7 @@ export function BillyWidget() {
         no_answer?: boolean;
         error?: string;
       };
+      if (requestConversationId !== conversationId.current) return;
 
       if (!data.success) {
         setMessages(prev =>
@@ -178,9 +270,11 @@ export function BillyWidget() {
           const draftRes = await fetch('https://hurried-gazing-harmonize.ngrok-free.dev/api/draft-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: userMsg, user_id: 'anonymous' }),
+            body: JSON.stringify({ query: userMsg, user_id: 'anonymous', conversation_id: requestConversationId }),
+            signal: controller.signal,
           });
 
+          if (requestConversationId !== conversationId.current) return;
           if (!draftRes.ok) {
             throw new Error('Draft request failed with status ' + draftRes.status);
           }
@@ -192,6 +286,7 @@ export function BillyWidget() {
             subject?: string;
             body?: string;
           };
+          if (requestConversationId !== conversationId.current) return;
           if (draftData.success) {
             setMessages(prev =>
               prev.filter(m => m.role !== 'loading').concat({
@@ -214,14 +309,17 @@ export function BillyWidget() {
             );
           }
         } catch {
-          setMessages(prev =>
-            prev.filter(m => m.role !== 'loading').concat({
-              role: 'billy',
-              text: data.response || "I couldn't find an answer to that.",
-            })
-          );
+          if (requestConversationId === conversationId.current) {
+            setMessages(prev =>
+              prev.filter(m => m.role !== 'loading').concat({
+                role: 'billy',
+                text: data.response || "I couldn't find an answer to that.",
+              })
+            );
+          }
         }
       } else {
+        if (requestConversationId !== conversationId.current) return;
         setMessages(prev =>
           prev.filter(m => m.role !== 'loading').concat({
             role: 'billy',
@@ -231,14 +329,22 @@ export function BillyWidget() {
         );
       }
     } catch {
-      setMessages(prev =>
-        prev.filter(m => m.role !== 'loading').concat({
-          role: 'billy',
-          text: "I'm having trouble connecting right now. Please try again in a moment.",
-        })
-      );
+      if (requestConversationId === conversationId.current) {
+        setMessages(prev =>
+          prev.filter(m => m.role !== 'loading').concat({
+            role: 'billy',
+            text: "I'm having trouble connecting right now. Please try again in a moment.",
+          })
+        );
+      }
+    } finally {
+      if (requestConversationId === conversationId.current) {
+        setLoading(false);
+      }
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+      }
     }
-    setLoading(false);
   };
 
   return (
@@ -263,7 +369,16 @@ export function BillyWidget() {
                 <p style={{ margin: 0, color: '#fff', fontWeight: 700, fontSize: 14 }}>Billy — DePaul's AI Assistant</p>
               </div>
               <button
-                onClick={() => setChatOpen(false)}
+                onClick={() => {
+                  if (view === 'chat') {
+                    setView('confirm-close');
+                  } else if (view === 'confirm-close') {
+                    setView('chat');
+                  } else {
+                    resetSession();
+                    setChatOpen(false);
+                  }
+                }}
                 aria-label="Close chat"
                 style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', opacity: 0.8, lineHeight: 1 }}
               >✕</button>
@@ -274,6 +389,52 @@ export function BillyWidget() {
               display: 'flex', flexDirection: 'column', gap: 12,
               background: '#FAFAFA',
             }}>
+              {view === 'confirm-close' ? (
+                <div style={{ margin: 'auto 0', textAlign: 'center', padding: '8px 4px' }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>👋</div>
+                  <h3 style={{ margin: '0 0 8px', color: NAVY, fontSize: 20 }}>End conversation?</h3>
+                  <p style={{ margin: '0 0 24px', color: '#666', fontSize: 14, lineHeight: 1.5 }}>
+                    Are you ready to finish chatting with Billy?
+                  </p>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button type="button" onClick={() => setView('chat')} style={{ flex: 1, padding: 12, background: '#f2f2f2', color: '#333', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>No, keep chatting</button>
+                    <button type="button" onClick={() => {
+                      if (messages.some((message) => message.role === 'user')) {
+                        setView('rating');
+                      } else {
+                        resetSession();
+                        setChatOpen(false);
+                      }
+                    }} style={{ flex: 1, padding: 12, background: SCARLET, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>Yes, end</button>
+                  </div>
+                </div>
+              ) : view === 'rating' ? (
+                <div style={{ margin: 'auto 0', textAlign: 'center', padding: '0 4px' }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>💬</div>
+                  <h3 style={{ margin: '0 0 6px', color: NAVY, fontSize: 20 }}>How did Billy do?</h3>
+                  <p style={{ margin: '0 0 18px', color: '#666', fontSize: 13, lineHeight: 1.5 }}>Your feedback helps us improve DePaul AI assistance.</p>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 16 }}>
+                    <button type="button" onClick={() => { setRatingVal('up'); setFeedbackStatus('idle'); }} aria-label="Thumbs up — helpful" style={{ width: 78, minHeight: 72, borderRadius: 12, border: ratingVal === 'up' ? `2px solid ${NAVY}` : '1px solid #ddd', background: ratingVal === 'up' ? '#eaf1fb' : '#fff', color: NAVY, cursor: 'pointer', fontSize: 25 }}>👍<span style={{ display: 'block', fontSize: 11, marginTop: 3 }}>Helpful</span></button>
+                    <button type="button" onClick={() => { setRatingVal('down'); setFeedbackStatus('idle'); }} aria-label="Thumbs down — not helpful" style={{ width: 78, minHeight: 72, borderRadius: 12, border: ratingVal === 'down' ? `2px solid ${SCARLET}` : '1px solid #ddd', background: ratingVal === 'down' ? '#fcecef' : '#fff', color: SCARLET, cursor: 'pointer', fontSize: 25 }}>👎<span style={{ display: 'block', fontSize: 11, marginTop: 3 }}>Not helpful</span></button>
+                  </div>
+                  {ratingVal && (
+                    <textarea
+                      value={feedbackVal}
+                      onChange={(event) => setFeedbackVal(event.target.value)}
+                      placeholder="Tell us more (optional)"
+                      maxLength={2000}
+                      aria-label="Optional feedback"
+                      style={{ width: '100%', height: 82, padding: 12, boxSizing: 'border-box', borderRadius: 12, borderWidth: 1, borderStyle: 'solid', borderColor: '#ddd', fontSize: 13, resize: 'none', fontFamily: 'inherit', outline: 'none' }}
+                    />
+                  )}
+                  {feedbackStatus === 'error' && <p style={{ margin: '8px 0 0', color: SCARLET, fontSize: 12 }}>Could not submit feedback. Please try again.</p>}
+                  <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+                    <button type="button" onClick={() => submitFeedback(true)} disabled={feedbackStatus === 'submitting'} style={{ flex: 1, padding: 11, background: '#f2f2f2', color: '#555', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>Skip</button>
+                    <button type="button" onClick={() => submitFeedback(false)} disabled={!ratingVal || feedbackStatus === 'submitting'} style={{ flex: 1.4, padding: 11, background: !ratingVal || feedbackStatus === 'submitting' ? '#e0a0a9' : SCARLET, color: '#fff', border: 'none', borderRadius: 12, fontWeight: 600, cursor: !ratingVal || feedbackStatus === 'submitting' ? 'not-allowed' : 'pointer' }}>{feedbackStatus === 'submitting' ? 'Submitting…' : feedbackStatus === 'error' ? 'Retry' : 'Submit feedback'}</button>
+                  </div>
+                </div>
+              ) : (
+                <>
               {messages.map((msg, i) => {
                 if (msg.role === 'loading') {
                   return (
@@ -371,9 +532,11 @@ export function BillyWidget() {
                 );
               })}
               <div ref={messagesEndRef} />
+                </>
+              )}
             </div>
 
-            <div style={{ padding: '12px 16px', borderTop: '1px solid #eee', background: '#fff', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+            {view === 'chat' && <div style={{ padding: '12px 16px', borderTop: '1px solid #eee', background: '#fff', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
               <input
                 type="text"
                 value={inputVal}
@@ -382,7 +545,7 @@ export function BillyWidget() {
                 placeholder="Ask me anything..."
                 disabled={loading}
                 style={{
-                  flex: 1, border: '1.5px solid #ddd', borderRadius: 24,
+                  flex: 1, borderWidth: 1.5, borderStyle: 'solid', borderColor: '#ddd', borderRadius: 24,
                   padding: '11px 18px', fontSize: 14, outline: 'none',
                   backgroundColor: '#fff',
                 }}
@@ -402,8 +565,8 @@ export function BillyWidget() {
                 onMouseEnter={e => { if (!loading && inputVal.trim()) (e.currentTarget as HTMLButtonElement).style.background = '#a01025'; }}
                 onMouseLeave={e => { if (!loading && inputVal.trim()) (e.currentTarget as HTMLButtonElement).style.background = SCARLET; }}
               >Send</button>
-            </div>
-            <p style={{ margin: '0 16px 10px', fontSize: 10.5, color: '#999', textAlign: 'center' }}>
+            </div>}
+            <p style={{ margin: '0 16px 10px', fontSize: 10.5, color: '#999', textAlign: 'center', display: view === 'chat' ? 'block' : 'none' }}>
               Billy can make mistakes. Please double-check important information.
             </p>
           </div>
@@ -431,7 +594,18 @@ export function BillyWidget() {
         )}
 
         <div
-          onClick={() => setChatOpen(!chatOpen)}
+          onClick={() => {
+            if (!chatOpen) {
+              setChatOpen(true);
+            } else if (view === 'chat') {
+              setView('confirm-close');
+            } else if (view === 'confirm-close') {
+              setView('chat');
+            } else {
+              resetSession();
+              setChatOpen(false);
+            }
+          }}
           style={{ cursor: 'pointer', width: '68px', height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0 }}
         >
           <img
