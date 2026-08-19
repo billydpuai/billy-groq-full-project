@@ -27,7 +27,7 @@ app.add_middleware(
         "http://localhost:3000",   # Eman's admin dashboard
         "https://termination-gain-stars-charming.trycloudflare.com",  # Cloudflare tunnel (Groq frontend)
     ],
-    allow_origin_regex=r"https://.*\.trycloudflare\.com",
+    allow_origin_regex=r"https://.*\.trycloudflare\.com|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -274,7 +274,7 @@ def log_interaction(question: str, classification: str, answer, response_time: f
 def build_email_draft(question: str, dept_info: dict) -> dict:
     """Generate the escalation email draft for a question that needs a department to answer."""
     email_response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-20b",
         messages=[
             {"role": "system", "content": EMAIL_DRAFT_SYSTEM_PROMPT},
             {"role": "user", "content": f"Write an email to {dept_info['dept']} asking about: {question}"},
@@ -387,7 +387,7 @@ def ask(body: Question):
 
     try:
         classify_response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
                 {"role": "user", "content": question},
@@ -416,7 +416,7 @@ def ask(body: Question):
 
     try:
         answer_response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[
                 {
                     "role": "system",
