@@ -270,7 +270,7 @@ export function GeminiWidget() {
           <div
             onClick={() => setChatOpen(true)}
             style={{
-              background: PURPLE,
+              background: '#003DA5',
               color: 'white',
               fontSize: '12px',
               fontWeight: '600',
@@ -280,7 +280,7 @@ export function GeminiWidget() {
               whiteSpace: 'nowrap',
               cursor: 'pointer',
               letterSpacing: '0.2px',
-              boxShadow: '0 2px 10px rgba(139,92,246,0.4)',
+              boxShadow: '0 2px 10px rgba(0,61,165,0.3)',
             }}
           >
             Ask Billy!
